@@ -2,30 +2,50 @@ name: Puppeteer E2E Tests
 
 on:
   push:
-    branches: [ main ]
+    branches: [main]
   pull_request:
 
 jobs:
-  test:
+  e2e:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      # 1. Check out the repository
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # 2. Set up Node.js 16 (adjust if you need a different version)
+      - name: Set up Node.js
+        uses: actions/setup-node@v3
         with:
           node-version: '16'
 
+      # 3. Install dependencies (requires that puppeteer is listed in package.json)
+      - name: Install dependencies
+        run: npm ci
+
+      # (Optional) If you haven't committed Puppeteer to package.json yet,
+      # install it here so it's in node_modules.
+      - name: Ensure Puppeteer is installed
+        run: npm install --no-save puppeteer
+
+      # 4. Run your Puppeteer script
       - name: Run Puppeteer script
+        env:
+          # Required for headless Chrome on Ubuntu runners
+          DISPLAY: ':99.0'
         run: node navigate-and-capture.js
 
-      - name: Upload artifacts
+      # 5. Upload artifacts regardless of success or failure
+      - name: Upload Puppeteer artifacts
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: puppeteer-artifacts
           path: artifacts/**
 
-      - name: Download artifacts (if needed)
-        uses: actions/download-artifact@v4
-        with:
-          name: puppeteer-artifacts
+      # (Optional) Download artifacts in a later job or for debugging
+      # - name: Download Puppeteer artifacts
+      #   uses: actions/download-artifact@v4
+      #   with:
+      #     name: puppeteer-artifacts
