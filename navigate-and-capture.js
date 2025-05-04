@@ -1,10 +1,10 @@
 /**
  * navigate-and-capture.js
  *
- * A robust Puppeteer script to navigate the Gmail account creation flow,
- * capture screenshots at each step, fill in randomly generated names,
- * and dump HTML on errors, using general selectors and a 5-second fixed wait.
- * Dynamically skips the "For my personal use" step if already on name entry page.
+ * A verbose Puppeteer script that navigates the Gmail account creation flow,
+ * captures screenshots at each step, fills in randomly generated names from
+ * popular lists, and dumps HTML on errors. Uses a general clickByText helper
+ * and fixed 5-second waits between navigations.
  */
 
 const fs = require('fs');
@@ -12,15 +12,38 @@ const path = require('path');
 const puppeteer = require('puppeteer');
 
 // Lists of the 100 most popular first and last names (U.S. data)
-const firstNames = [/* ...firstNames array as before... */];
-const lastNames = [/* ...lastNames array as before... */];
+const firstNames = [
+  'James','Mary','John','Patricia','Robert','Jennifer','Michael','Linda','William','Elizabeth',
+  'David','Barbara','Richard','Susan','Joseph','Jessica','Thomas','Sarah','Charles','Karen',
+  'Christopher','Nancy','Daniel','Lisa','Matthew','Betty','Anthony','Dorothy','Donald','Sandra',
+  'Mark','Ashley','Paul','Kimberly','Steven','Emily','Andrew','Donna','Kenneth','Michelle',
+  'George','Carol','Joshua','Amanda','Kevin','Melissa','Brian','Deborah','Edward','Stephanie',
+  'Ronald','Rebecca','Timothy','Sharon','Jason','Laura','Jeffrey','Cynthia','Ryan','Kathleen',
+  'Jacob','Amy','Gary','Shirley','Nicholas','Angela','Eric','Helen','Jonathan','Anna',
+  'Stephen','Brenda','Larry','Pamela','Justin','Nicole','Scott','Emma','Brandon','Samantha',
+  'Benjamin','Katherine','Samuel','Christine','Frank','Debra','Gregory','Rachel','Raymond','Catherine',
+  'Alexander','Carolyn','Patrick','Janet','Jack','Ruth','Dennis','Maria','Jerry','Heather'
+];
+
+const lastNames = [
+  'Smith','Johnson','Williams','Brown','Jones','Garcia','Miller','Davis','Rodriguez','Martinez',
+  'Hernandez','Lopez','Gonzalez','Wilson','Anderson','Thomas','Taylor','Moore','Jackson','Martin',
+  'Lee','Perez','Thompson','White','Harris','Sanchez','Clark','Ramirez','Lewis','Robinson',
+  'Walker','Young','Allen','King','Wright','Scott','Torres','Nguyen','Hill','Flores',
+  'Green','Adams','Nelson','Baker','Hall','Rivera','Campbell','Mitchell','Carter','Roberts',
+  'Gomez','Phillips','Evans','Turner','Diaz','Parker','Cruz','Edwards','Collins','Reyes',
+  'Stewart','Morris','Morales','Murphy','Cook','Rogers','Gutierrez','Ortiz','Morgan','Cooper',
+  'Peterson','Bailey','Reed','Kelly','Howard','Ramos','Kim','Cox','Ward','Richardson',
+  'Watson','Brooks','Chavez','Wood','James','Bennett','Gray','Mendoza','Ruiz','Hughes',
+  'Price','Alvarez','Castillo','Sanders','Patel','Myers','Long','Ross','Foster','Jimenez'
+];
 
 // Helper: get a random element from an array
 function getRandom(arr) {
   return arr[Math.floor(Math.random() * arr.length)];
 }
 
-// Custom helper: click an element matching selector whose text contains given substring
+// Helper: click an element matching selector whose innerText contains text
 async function clickByText(page, selector, text, timeout = 60000, polling = 500) {
   const start = Date.now();
   while (Date.now() - start < timeout) {
@@ -66,47 +89,47 @@ async function clickByText(page, selector, text, timeout = 60000, polling = 500)
     page.setDefaultTimeout(60000);
     page.on('console', msg => console.log(`[PAGE ${msg.type().toUpperCase()}] ${msg.text()}`));
 
-    // Step 1: Navigate to Gmail
-    console.log('[STEP 1] Navigating to https://gmail.com...');
+    // Step 1
+    console.log('[STEP 1] Navigate to Gmail home');
     await page.goto('https://gmail.com', { waitUntil: 'networkidle2', timeout: 60000 });
     await new Promise(r => setTimeout(r, 5000));
     await captureScreenshot('gmail-home');
 
-    // Step 2: Click "Create account"
-    console.log('[STEP 2] Clicking "Create account"...');
+    // Step 2
+    console.log('[STEP 2] Click "Create account"');
     await clickByText(page, 'a, button, span, div', 'Create account');
-    console.log('[INFO] "Create account" clicked.');
+    console.log('[INFO] "Create account" clicked');
     await new Promise(r => setTimeout(r, 5000));
     await captureScreenshot('click-create-account');
 
-        // Step 3: Click "For my personal use" using clickByText
-    console.log('[STEP 3] Clicking "For my personal use"...');
+    // Step 3
+    console.log('[STEP 3] Click "For my personal use"');
     await clickByText(page, 'a, button, span, div', 'For my personal use');
-    console.log('[INFO] "For my personal use" clicked.');
+    console.log('[INFO] "For my personal use" clicked');
     await new Promise(r => setTimeout(r, 5000));
     await captureScreenshot('for-personal-use');
 
-    // Step 4: Fill in randomly generated names
-    const randomFirst = getRandom(firstNames);
-    const randomLast = getRandom(lastNames);
-    console.log(`[STEP 4] Filling first: ${randomFirst}, last: ${randomLast}`);
-    await page.type('input[name="firstName"]', randomFirst, { delay: 100 });
-    await page.type('input[name="lastName"]', randomLast, { delay: 100 });
+    // Step 4
+    const first = getRandom(firstNames);
+    const last = getRandom(lastNames);
+    console.log(`[STEP 4] Fill names: ${first} ${last}`);
+    await page.type('input[name="firstName"]', first, { delay: 100 });
+    await page.type('input[name="lastName"]', last, { delay: 100 });
     await captureScreenshot('filled-name');
 
-    // Step 5: Click "Next"
-    console.log('[STEP 5] Clicking "Next"...');
-    await clickByText(page, 'span, button, div', 'Next');
-    console.log('[INFO] "Next" clicked.');
+    // Step 5
+    console.log('[STEP 5] Click "Next"');
+    await clickByText(page, 'a, button, span, div', 'Next');
+    console.log('[INFO] "Next" clicked');
     await new Promise(r => setTimeout(r, 5000));
     await captureScreenshot('after-next');
 
-    console.log('[INFO] All steps completed.');
+    console.log('[INFO] Script completed successfully');
   } catch (err) {
     console.error('[ERROR]', err);
-    const errBase = `error-${step.toString().padStart(2,'0')}`;
-    const shot = path.join(artifactsDir, `${errBase}.png`);
-    const htmlf = path.join(artifactsDir, `${errBase}.html`);
+    const base = `error-${step.toString().padStart(2,'0')}`;
+    const shot = path.join(artifactsDir, `${base}.png`);
+    const htmlf = path.join(artifactsDir, `${base}.html`);
     if (page) {
       await page.screenshot({ path: shot, fullPage: true });
       fs.writeFileSync(htmlf, await page.content());
