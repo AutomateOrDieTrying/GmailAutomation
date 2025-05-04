@@ -79,13 +79,9 @@ async function clickByText(page, selector, text, timeout = 60000, polling = 500)
     await new Promise(r => setTimeout(r, 5000));
     await captureScreenshot('click-create-account');
 
-    // Step 3: Click "For my personal use"
-    console.log('[STEP 3] Waiting for "For my personal use" option...');
-    const xpath = `//*[contains(text(), 'For my personal use')]`;
-    await page.waitForXPath(xpath, { timeout: 60000 });
-    const [personalBtn] = await page.$x(xpath);
-    if (!personalBtn) throw new Error('"For my personal use" element not found');
-    await personalBtn.click();
+        // Step 3: Click "For my personal use" using clickByText
+    console.log('[STEP 3] Clicking "For my personal use"...');
+    await clickByText(page, 'a, button, span, div', 'For my personal use');
     console.log('[INFO] "For my personal use" clicked.');
     await new Promise(r => setTimeout(r, 5000));
     await captureScreenshot('for-personal-use');
