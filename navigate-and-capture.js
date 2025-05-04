@@ -43,6 +43,19 @@ function getRandom(arr) {
   return arr[Math.floor(Math.random() * arr.length)];
 }
 
+// Helper: wait for XPath with polling
+async function waitForXPath(page, xpath, timeout = 60000, polling = 500) {
+  const start = Date.now();
+  while (Date.now() - start < timeout) {
+    const elements = await page.$x(xpath);
+    if (elements.length > 0) {
+      return elements;
+    }
+    await new Promise(res => setTimeout(res, polling));
+  }
+  throw new Error(`Timeout waiting for XPath: ${xpath}`);
+}
+
 // Helper: click an element matching selector whose innerText contains text
 async function clickByText(page, selector, text, timeout = 60000, polling = 500) {
   const start = Date.now();
@@ -102,10 +115,12 @@ async function clickByText(page, selector, text, timeout = 60000, polling = 500)
     await new Promise(r => setTimeout(r, 5000));
     await captureScreenshot('click-create-account');
 
-    // Step 3
-    console.log('[STEP 3] Click "For my personal use"');
-    await clickByText(page, 'a, button, span, div', 'For my personal use');
-    console.log('[INFO] "For my personal use" clicked');
+        // Step 3: Click "For my personal use" using XPath
+    console.log('[STEP 3] Waiting for "For my personal use" option...');
+    const personalUseXPath = `//span[contains(text(), 'For my personal use')]`;
+    const [personalEl] = await waitForXPath(page, personalUseXPath, 5000);
+    console.log('[INFO] "For my personal use" element found. Clicking...');
+    await personalEl.click();
     await new Promise(r => setTimeout(r, 5000));
     await captureScreenshot('for-personal-use');
 
