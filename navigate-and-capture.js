@@ -2,19 +2,21 @@
  * signup-full.js
  *
  * Complete Puppeteer script to:
- * 1. Bypass any choice screens by using Google’s direct signup URL
+ * 1. Bypass choice screens by using Google’s direct signup URL
  * 2. Fill the “What’s your name?” form
  * 3. Click “Next”
  * 4. Wait for and fill the birthday & gender form
- * 5. Click “Next” to land on the username page
- * 6. Capture screenshots + HTML at every step into ./artifacts/
+ * 5. Click “Next” to land on the username suggestions page
+ * 6. Select the first suggested address
+ * 7. Click “Next” to finalize that choice
+ * 8. Capture screenshots + HTML at every step into ./artifacts/
  */
 
 const fs = require('fs');
 const path = require('path');
 const puppeteer = require('puppeteer');
 
-(async () => {
+;(async () => {
   // — Prepare artifacts directory
   const artifacts = path.resolve(__dirname, 'artifacts');
   if (!fs.existsSync(artifacts)) fs.mkdirSync(artifacts);
@@ -33,7 +35,11 @@ const puppeteer = require('puppeteer');
   async function clickByText(page, selector, text) {
     const ok = await page.evaluate((sel, txt) => {
       for (const el of document.querySelectorAll(sel)) {
-        if (el.innerText.trim() === txt) { el.scrollIntoView(); el.click(); return true; }
+        if (el.innerText.trim() === txt) {
+          el.scrollIntoView();
+          el.click();
+          return true;
+        }
       }
       return false;
     }, selector, text);
@@ -42,7 +48,12 @@ const puppeteer = require('puppeteer');
 
   // — Launch browser
   log('LAUNCH', 'Starting Puppeteer');
-  const browser = await puppeteer.launch({ headless: true, args: ['--no-sandbox'], timeout: 60000 });
+  const browser = await puppeteer.launch({
+    headless: true,
+    args: ['--no-sandbox'],
+    timeout: 60000,
+    protocolTimeout: 120000
+  });
   const page = await browser.newPage();
   page.setDefaultTimeout(60000);
 
@@ -64,7 +75,7 @@ const puppeteer = require('puppeteer');
     await delay(500);
     await dump('02-name-filled', page);
 
-    // Step 3: Click “Next”
+    // Step 3: Click “Next” on name form
     log('STEP', 'Clicking Next on name form');
     await clickByText(page, 'button, div[role="button"]', 'Next');
     await delay(2000);
@@ -78,27 +89,44 @@ const puppeteer = require('puppeteer');
 
     // Step 5: Fill birthday & gender
     log('STEP', 'Filling month/day/year/gender');
-    await page.select('#month', '1');              // January
+    await page.select('#month', '1');            // January
     await page.type('#day',  '01', { delay: 50 });
     await page.type('#year', '2000', { delay: 50 });
-    await page.select('#gender', '1');             // Male
+    await page.select('#gender', '1');           // Male
     await delay(500);
     await dump('05-birthday-filled', page);
 
     // Step 6: Click “Next” on birthday form
     log('STEP', 'Clicking Next on birthday form');
-    // The Next button is inside a div with id="birthdaygenderNext"
     await page.click('#birthdaygenderNext');
     await delay(2000);
     await dump('06-after-birthday-next', page);
 
-    // Step 7: Wait for username input
-    log('STEP', 'Waiting for username field');
-    await page.waitForSelector('input[name="Username"]', { visible: true, timeout: 20000 })
-      .catch(() => log('WARN', 'Username input did not appear in time'));
-    await dump('07-username-form', page);
+    // Step 7: Wait for username suggestions
+    log('STEP', 'Waiting for username suggestions (radio items)');
+    // Google renders the options as <div role="radio"> elements:
+    await page.waitForSelector('div[role="radio"]', { visible: true, timeout: 20000 });
+    await delay(500);
+    await dump('07-username-options-loaded', page);
 
-    log('END', 'Reached username step successfully');
+    // Step 8: Select the first suggested address
+    log('STEP', 'Selecting the first suggested email');
+    await page.evaluate(() => {
+      const radios = Array.from(document.querySelectorAll('div[role="radio"]'));
+      if (!radios.length) throw new Error('No suggestion radios found');
+      radios[0].scrollIntoView();
+      radios[0].click();
+    });
+    await delay(500);
+    await dump('08-first-suggestion-selected', page);
+
+    // Step 9: Click “Next” on username form
+    log('STEP', 'Clicking Next to confirm username');
+    await clickByText(page, 'button, div[role="button"]', 'Next');
+    await delay(2000);
+    await dump('09-after-username-next', page);
+
+    log('END', 'Reached confirmation step successfully');
   } catch (err) {
     log('ERROR', err.stack || err.message);
     await dump('error-state', page);
