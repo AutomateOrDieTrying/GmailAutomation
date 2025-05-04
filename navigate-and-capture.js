@@ -2,13 +2,27 @@
  * navigate-and-capture.js
  *
  * A verbose Puppeteer script to navigate the Gmail account creation flow,
- * capture screenshots at each step, and dump HTML on errors, with simplified,
- * general selectors and a 5-second fixed wait after each navigation.
+ * capture screenshots at each step, and dump HTML on errors, using general selectors,
+ * a 5-second sleep after each navigation, and a custom waitForXPath fallback for
+ * environments where page.waitForXPath is unavailable.
  */
 
 const fs = require('fs');
 const path = require('path');
 const puppeteer = require('puppeteer');
+
+// Custom helper: wait for XPath with polling
+async function waitForXPath(page, xpath, timeout = 60000, polling = 500) {
+  const start = Date.now();
+  while (Date.now() - start < timeout) {
+    const elements = await page.$x(xpath);
+    if (elements.length > 0) {
+      return elements;
+    }
+    await new Promise(res => setTimeout(res, polling));
+  }
+  throw new Error(`Timeout waiting for XPath: ${xpath}`);
+}
 
 (async () => {
   console.log('[INFO] Starting Puppeteer script...');
@@ -62,11 +76,9 @@ const puppeteer = require('puppeteer');
     // Step 2: Click "Create account"
     console.log('[STEP 2] Attempting to click "Create account"...');
     const createAccountXPath = `//a[contains(text(), 'Create account')]`;
-    await page.waitForXPath(createAccountXPath, { timeout: 60000 });
-    const [createEl] = await page.$x(createAccountXPath);
-    if (!createEl) throw new Error('"Create account" element not found');
+    const [createEl] = await waitForXPath(page, createAccountXPath, 60000);
+    console.log('[INFO] "Create account" element found. Clicking...');
     await createEl.click();
-    console.log('[INFO] "Create account" clicked.');
     await page.waitForNavigation({ waitUntil: 'networkidle0', timeout: 60000 });
     console.log(`[INFO] After click, navigated to: ${page.url()}`);
     console.log('[INFO] Waiting for 5 seconds after navigation...');
@@ -76,11 +88,9 @@ const puppeteer = require('puppeteer');
     // Step 3: Click "For my personal use"
     console.log('[STEP 3] Attempting to click "For my personal use"...');
     const personalUseXPath = `//span[contains(text(), 'For my personal use')]`;
-    await page.waitForXPath(personalUseXPath, { timeout: 60000 });
-    const [personalEl] = await page.$x(personalUseXPath);
-    if (!personalEl) throw new Error('"For my personal use" element not found');
+    const [personalEl] = await waitForXPath(page, personalUseXPath, 60000);
+    console.log('[INFO] "For my personal use" element found. Clicking...');
     await personalEl.click();
-    console.log('[INFO] "For my personal use" clicked.');
     await page.waitForNavigation({ waitUntil: 'networkidle0', timeout: 60000 });
     console.log(`[INFO] After click, navigated to: ${page.url()}`);
     console.log('[INFO] Waiting for 5 seconds after navigation...');
