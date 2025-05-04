@@ -96,41 +96,16 @@ async function clickByText(page, selector, text, timeout = 60000, polling = 500)
     await new Promise(res => setTimeout(res, 5000));
     await captureScreenshot('gmail-home');
 
-    // Step 2: Click "Create account"
-    console.log('[STEP 2] Click "Create account"');
-    await clickByText(page, 'a, button, span, div', 'Create account');
-    console.log('[INFO] "Create account" clicked');
+        // Step 2: Navigate directly to name entry page
+    console.log('[STEP 2] Navigating directly to the signup name entry page');
+    await page.goto(
+      'https://accounts.google.com/lifecycle/steps/signup/name?continue=https://mail.google.com/mail/&dsh=S405159773:1746361887328227&ec=asw-gmail-hero-create&flowEntry=SignUp&flowName=GlifWebSignIn&service=mail&theme=glif&TL=AArrULS-B3b39IRxb4kbTeirVYZT120L2yMyM6i684hVbUfA8E3k49jKBKQEUxOq',
+      { waitUntil: 'networkidle2', timeout: 60000 }
+    );
     await new Promise(res => setTimeout(res, 5000));
-    await captureScreenshot('click-create-account');
+    await captureScreenshot('signup-name-page');
 
-    // Step 3: Click "For my personal use" via Shadow DOM
-    console.log('[STEP 3] Clicking "For my personal use" option');
-    // Wait for the Gmail signup component to hydrate
-    await page.waitForSelector('c-wiz[jscontroller="hc6Ubd"]', { visible: true, timeout: 30000 });
-    // Traverse Shadow DOM to locate and click the option
-    await page.evaluate(() => {
-      const wizards = Array.from(document.querySelectorAll('c-wiz[jscontroller="hc6Ubd"]'));
-      for (const wiz of wizards) {
-        const root = wiz.shadowRoot;
-        if (!root) continue;
-        const span = Array.from(root.querySelectorAll('span')).find(s =>
-          s.innerText.trim() === 'For my personal use'
-        );
-        if (span) {
-          const clickable = span.closest('button, div');
-          if (!clickable) throw new Error('Clickable container not found');
-          clickable.scrollIntoView();
-          clickable.click();
-          return;
-        }
-      }
-      throw new Error('"For my personal use" not found in Shadow DOM');
-    });
-    console.log('[INFO] "For my personal use" clicked');
-    await new Promise(res => setTimeout(res, 5000));
-    await captureScreenshot('for-personal-use');
-
-    // Step 4: Fill in randomly generated names
+    // Step 3: Fill in randomly generated names: Fill in randomly generated names
     const first = getRandom(firstNames);
     const last = getRandom(lastNames);
     console.log(`[STEP 4] Fill names: ${first} ${last}`);
