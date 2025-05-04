@@ -3,7 +3,10 @@
  *
  * Puppeteer script to exhaustively try every way to click the
  * “For my personal use” button on the Gmail “Create account” flow.
- * Always emits artifacts into `artifacts/`, never aborts early on wait failures.
+ * - Never aborts early on timeouts
+ * - Always writes artifacts/PNG+HTML for every step & attempt
+ * - Handles wrong redirects (e.g. landing on sign-in page) as failures
+ * - Summarizes exactly which strategies worked or failed
  */
 
 const fs = require('fs');
@@ -17,9 +20,7 @@ const puppeteer = require('puppeteer');
 
   // --- Helpers
   const delay = ms => new Promise(res => setTimeout(res, ms));
-  function log(tag, msg) {
-    console.log(`[${new Date().toISOString()}] [${tag}] ${msg}`);
-  }
+  const log = (tag, msg) => console.log(`[${new Date().toISOString()}] [${tag}] ${msg}`);
   async function dump(step, page) {
     const safe = step.replace(/[^a-z0-9]+/gi, '-').toLowerCase();
     const png  = path.join(artifactsDir, `${safe}.png`);
@@ -31,8 +32,8 @@ const puppeteer = require('puppeteer');
     catch (e) { log('ERROR', `HTML dump failed: ${e.message}`); }
   }
 
-  // --- Launch with extended timeouts
-  log('LAUNCH', 'Starting browser (timeout=60s, protocolTimeout=120s)...');
+  // --- Launch browser
+  log('LAUNCH', 'Starting Puppeteer (timeout=60s, protocolTimeout=120s)...');
   let browser;
   try {
     browser = await puppeteer.launch({
@@ -50,175 +51,194 @@ const puppeteer = require('puppeteer');
   page.setDefaultTimeout(30000);
   page.on('console', msg => log('PAGE', msg.text()));
 
-  try {
-    // Step 1: Navigate to Gmail
-    log('STEP', 'Navigating to https://gmail.com');
-    await page.goto('https://gmail.com', { waitUntil: 'networkidle2' });
-    await delay(3000);
-    await dump('gmail-home', page);
+  // --- Step 1: Navigate to Gmail home
+  log('STEP', 'Navigating to https://gmail.com');
+  await page.goto('https://gmail.com', { waitUntil: 'networkidle2' }).catch(e => log('ERROR', `Goto failed: ${e.message}`));
+  await delay(3000);
+  await dump('gmail-home', page);
 
-    // Step 2: Click "Create account"
-    log('STEP', 'Clicking "Create account"');
-    try {
-      await page.evaluate(() => {
-        const btn = Array.from(document.querySelectorAll('a,button,div,span'))
-          .find(el => /create account/i.test(el.innerText));
-        if (!btn) throw new Error('"Create account" not found');
-        btn.scrollIntoView();
-        btn.click();
-      });
-    } catch (err) {
-      log('ERROR', `Clicking "Create account" failed: ${err.message}`);
-    }
-    await delay(4000);
-    await dump('after-create-account', page);
-
-    // Step 3: Wait for text "For my personal use" (but don't abort on failure)
-    log('STEP', 'Waiting up to 60s for text "For my personal use" to appear');
-    let sawText = false;
-    try {
-      await page.waitForFunction(
-        () => Array.from(document.querySelectorAll('*'))
-                  .some(el => el.innerText && el.innerText.includes('For my personal use')),
-        { timeout: 60000 }
-      );
-      sawText = true;
-      log('OK', 'Text "For my personal use" detected');
-    } catch (err) {
-      log('WARN', `Timed out waiting for text: ${err.message}`);
-    }
-    await dump('for-personal-use-visible', page);
-
-    // Step 4: Enumerate all elements containing that text
-    const candidates = await page.$$eval('*', els =>
-      els
-        .filter(el => el.innerText && el.innerText.includes('For my personal use'))
-        .map((el, i) => ({
-          index: i,
-          tag: el.tagName,
-          text: el.innerText.trim(),
-          snippet: el.outerHTML.slice(0,200).replace(/\s+/g,' ')
-        }))
-    );
-    log('CANDIDATES', JSON.stringify(candidates, null, 2));
-
-    // Step 5: Define click strategies
-    const attempts = [
-      {
-        name: 'direct-text-click',
-        fn: async () => {
-          const ok = await page.evaluate(() => {
-            const el = Array.from(document.querySelectorAll('*'))
-              .find(e => e.innerText && e.innerText.includes('For my personal use'));
-            if (!el) return false;
-            el.scrollIntoView();
-            el.click();
-            return true;
-          });
-          if (!ok) throw new Error('No element found by direct-text-click');
-        }
-      },
-      {
-        name: 'xpath-click',
-        fn: async () => {
-          const [el] = await page.$x("//*[contains(normalize-space(.),'For my personal use')]");
-          if (!el) throw new Error('XPath matched 0 nodes');
-          await el.evaluate(e => e.scrollIntoView());
-          await el.click();
-        }
-      },
-      {
-        name: 'mouse-event-click',
-        fn: async () => {
-          const ok = await page.evaluate(() => {
-            const el = Array.from(document.querySelectorAll('*'))
-              .find(e => e.innerText && e.innerText.includes('For my personal use'));
-            if (!el) return false;
-            const r = el.getBoundingClientRect();
-            ['mousedown','mouseup','click'].forEach(type =>
-              el.dispatchEvent(new MouseEvent(type, {
-                bubbles: true,
-                clientX: r.left + 5,
-                clientY: r.top + 5
-              }))
-            );
-            return true;
-          });
-          if (!ok) throw new Error('MouseEvent dispatch failed');
-        }
-      },
-      {
-        name: 'nth-instance-click',
-        fn: async () => {
-          const els = await page.$$('body *');
-          const matches = [];
-          for (const el of els) {
-            const txt = await (await el.getProperty('innerText')).jsonValue();
-            if (txt && txt.includes('For my personal use')) matches.push(el);
-          }
-          if (!matches.length) throw new Error('No matching elements for nth-instance-click');
-          await matches[0].evaluate(e => e.scrollIntoView());
-          await matches[0].click();
-        }
-      },
-      {
-        name: 'keyboard-nav-enter',
-        fn: async () => {
-          await page.keyboard.press('Tab');
-          await page.keyboard.press('Tab');
-          await page.keyboard.press('Enter');
-        }
-      },
-      {
-        name: 'shadow-dom-click',
-        fn: async () => {
-          const host = await page.$('c-wiz');
-          if (!host) throw new Error('No <c-wiz> host');
-          const root = await host.evaluateHandle(h => h.shadowRoot);
-          // Use querySelectorAll inside shadow root
-          const btn = await root.asElement().$$eval('div', divs =>
-            divs.find(d => d.innerText && d.innerText.includes('For my personal use'))
+  // --- Step 2: Click "Create account" via multiple strategies
+  const createAccountResults = [];
+  const createAccountStrategies = [
+    {
+      name: 'inner-text',
+      fn: async () => {
+        await page.evaluate(() => {
+          const btn = Array.from(document.querySelectorAll('a,button,div,span'))
+            .find(el => /create account/i.test(el.innerText));
+          if (!btn) throw new Error('not found');
+          btn.scrollIntoView();
+          btn.click();
+        });
+      }
+    },
+    {
+      name: 'css-href-signup',
+      fn: async () => {
+        await page.click('a[href*="signup"], button[jsname*="signup"]');
+      }
+    },
+    {
+      name: 'xpath',
+      fn: async () => {
+        const [el] = await page.$x("//a[contains(.,'Create account') or contains(.,'create account')]");
+        if (!el) throw new Error('xpath no node');
+        await el.evaluate(e => e.scrollIntoView());
+        await el.click();
+      }
+    },
+    {
+      name: 'mouse-event',
+      fn: async () => {
+        await page.evaluate(() => {
+          const btn = Array.from(document.querySelectorAll('a,button,div,span'))
+            .find(el => /create account/i.test(el.innerText));
+          if (!btn) throw new Error('not found');
+          const r = btn.getBoundingClientRect();
+          ['mousedown','mouseup','click'].forEach(type =>
+            btn.dispatchEvent(new MouseEvent(type, {
+              bubbles: true, clientX: r.left+5, clientY: r.top+5
+            }))
           );
-          if (!btn) throw new Error('Shadow DOM button not found');
-          // We need a handle to that element, so refetch it
-          const handle = await root.asElement().$('div');
-          await handle.evaluate(e => e.scrollIntoView());
-          await handle.click();
-        }
-      },
-    ];
+        });
+      }
+    },
+  ];
 
-    // Step 6: Try each strategy
-    const results = [];
-    for (const { name, fn } of attempts) {
-      log('TRY', name);
-      try {
-        await fn();
-        await delay(2000);
-        await dump(`after-${name}`, page);
-        log('SUCCESS', `${name} succeeded → URL: ${page.url()}`);
-        results.push({ name, success: true });
-        break;
-      } catch (err) {
-        log('FAIL', `${name} failed: ${err.message}`);
-        await dump(`fail-${name}`, page);
-        results.push({ name, success: false, error: err.message });
+  let createAccountSucceeded = false;
+  for (const strat of createAccountStrategies) {
+    log('TRY', `CreateAccount:${strat.name}`);
+    try {
+      await strat.fn();
+      await delay(4000);
+      await dump(`after-createAccount-${strat.name}`, page);
+      // detect if we’re on the choice screen: presence of any "For my personal use" text
+      const hasChoice = await page.evaluate(() =>
+        Array.from(document.querySelectorAll('*'))
+          .some(el => el.innerText && el.innerText.includes('For my personal use'))
+      );
+      if (!hasChoice) throw new Error(`no choice screen (URL=${page.url()})`);
+      log('SUCCESS', `CreateAccount:${strat.name} led to choice screen`);
+      createAccountResults.push({ name: strat.name, success: true });
+      createAccountSucceeded = true;
+      break;
+    } catch (err) {
+      log('FAIL', `CreateAccount:${strat.name} failed: ${err.message}`);
+      createAccountResults.push({ name: strat.name, success: false, error: err.message });
+      // reload home for next strategy
+      await page.goto('https://gmail.com', { waitUntil: 'networkidle2' }).catch(() => {});
+      await delay(3000);
+    }
+  }
+  if (!createAccountSucceeded) {
+    log('WARN', 'All CreateAccount strategies failed; proceeding anyway');
+  }
+
+  // Always dump post-create-account state
+  await dump('post-create-account', page);
+
+  // --- Step 3: Click "For my personal use" via multiple strategies
+  const personalUseResults = [];
+  const personalUseStrategies = [
+    {
+      name: 'inner-text',
+      fn: async () => {
+        const ok = await page.evaluate(() => {
+          const el = Array.from(document.querySelectorAll('*'))
+            .find(e => e.innerText && e.innerText.includes('For my personal use'));
+          if (!el) return false;
+          el.scrollIntoView();
+          el.click();
+          return true;
+        });
+        if (!ok) throw new Error('not found');
+      }
+    },
+    {
+      name: 'css-attribute',
+      fn: async () => {
+        await page.click('div[data-button-type="multipleChoiceIdentifier"][data-value="For my personal use"]');
+      }
+    },
+    {
+      name: 'xpath',
+      fn: async () => {
+        const [el] = await page.$x("//*[contains(normalize-space(.),'For my personal use')]");
+        if (!el) throw new Error('xpath no node');
+        await el.evaluate(e => e.scrollIntoView());
+        await el.click();
+      }
+    },
+    {
+      name: 'mouse-event',
+      fn: async () => {
+        await page.evaluate(() => {
+          const el = Array.from(document.querySelectorAll('*'))
+            .find(e => e.innerText && e.innerText.includes('For my personal use'));
+          if (!el) throw new Error('not found');
+          const r = el.getBoundingClientRect();
+          ['mousedown','mouseup','click'].forEach(type =>
+            el.dispatchEvent(new MouseEvent(type, {
+              bubbles: true, clientX: r.left+5, clientY: r.top+5
+            }))
+          );
+        });
+      }
+    },
+    {
+      name: 'shadow-dom',
+      fn: async () => {
+        const host = await page.$('c-wiz');
+        if (!host) throw new Error('c-wiz not found');
+        const root = await host.evaluateHandle(h => h.shadowRoot);
+        const btn = await root.asElement().$$eval(
+          'div', divs => divs.find(d => d.innerText.includes('For my personal use'))
+        );
+        if (!btn) throw new Error('shadow button not found');
+        // Need a handle to click
+        const handle = await root.asElement().$('div');
+        await handle.evaluate(e => e.scrollIntoView());
+        await handle.click();
+      }
+    },
+  ];
+
+  let personalUseSucceeded = false;
+  for (const strat of personalUseStrategies) {
+    log('TRY', `PersonalUse:${strat.name}`);
+    try {
+      await strat.fn();
+      await delay(3000);
+      await dump(`after-personalUse-${strat.name}`, page);
+      // if we land on sign-in page, that’s a failure
+      if (/signin\/identifier/.test(page.url())) {
+        throw new Error(`redirected to sign-in (${page.url()})`);
+      }
+      log('SUCCESS', `PersonalUse:${strat.name} clicked correctly → URL=${page.url()}`);
+      personalUseResults.push({ name: strat.name, success: true });
+      personalUseSucceeded = true;
+      break;
+    } catch (err) {
+      log('FAIL', `PersonalUse:${strat.name} failed: ${err.message}`);
+      personalUseResults.push({ name: strat.name, success: false, error: err.message });
+      // back to choice screen if needed
+      if (createAccountSucceeded) {
+        await dump('recover-to-choice-before-next', page);
       }
     }
-
-    // Step 7: Summary
-    log('SUMMARY', 'Strategy results:');
-    results.forEach(r => {
-      log('RESULT', `${r.success ? '✅' : '❌'} ${r.name}` + (r.error ? ` (${r.error})` : ''));
-    });
-
-    // Final dump
-    await dump('final-state', page);
-  } catch (outerErr) {
-    log('ERROR', `Unhandled exception: ${outerErr.stack || outerErr.message}`);
-    await dump('uncaught-error', page);
-  } finally {
-    await browser.close();
-    log('END', 'Browser closed');
   }
+
+  // --- Final state dump & summary
+  await dump('final-state', page);
+  log('SUMMARY', 'CreateAccount strategies:');
+  createAccountResults.forEach(r =>
+    log('RESULT', `${r.success ? '✅' : '❌'} ${r.name}${r.error ? ` (${r.error})` : ''}`)
+  );
+  log('SUMMARY', 'PersonalUse strategies:');
+  personalUseResults.forEach(r =>
+    log('RESULT', `${r.success ? '✅' : '❌'} ${r.name}${r.error ? ` (${r.error})` : ''}`)
+  );
+
+  await browser.close();
+  log('END', 'Browser closed');
 })();
