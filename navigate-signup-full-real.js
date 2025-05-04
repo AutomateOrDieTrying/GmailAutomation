@@ -49,7 +49,7 @@ const MAX_RETRIES = 3000;
     const hasIframe = await page.$('iframe[src*="recaptcha"], iframe[src*="captcha"]');
     if (hasIframe) return true;
     const textPresent = await page.evaluate(() =>
-      /confirm you're not a robot|verify|human/i.test(document.body.innerText)
+      /error|sorry|confirm you're not a robot|verify|human/i.test(document.body.innerText)
     );
     return textPresent;
   }
