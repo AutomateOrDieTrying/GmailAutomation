@@ -3,8 +3,8 @@
  *
  * A verbose Puppeteer script that navigates the Gmail account creation flow,
  * captures screenshots at each step, fills in randomly generated names from
- * popular lists, and dumps HTML on errors. Uses a general clickByText helper
- * and fixed 5-second waits between navigations.
+ * popular lists, and dumps HTML on errors. Uses general click helpers and fixed
+ * 5-second waits between actions.
  */
 
 const fs = require('fs');
@@ -43,27 +43,7 @@ function getRandom(arr) {
   return arr[Math.floor(Math.random() * arr.length)];
 }
 
-// Helper: click element by XPath with pollingsync function clickByXPath(page, xpath, timeout = 5000, polling = 500) {
-  const start = Date.now();
-  while (Date.now() - start < timeout) {
-    const clicked = await page.evaluate(xp => {
-      const result = document.evaluate(xp, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null);
-      const el = result.singleNodeValue;
-      if (el) {
-        el.scrollIntoView();
-        el.click();
-        return true;
-      }
-      return false;
-    }, xpath);
-    if (clicked) return;
-    await new Promise(res => setTimeout(res, polling));
-  }
-  throw new Error(`Timeout clicking XPath: ${xpath}`);
-}(`Timeout waiting for XPath: ${xpath}`);
-}
-
-// Helper: click an element matching selector whose innerText contains text
+// Helper: click an element by CSS selector containing specific text
 async function clickByText(page, selector, text, timeout = 60000, polling = 500) {
   const start = Date.now();
   while (Date.now() - start < timeout) {
@@ -83,6 +63,26 @@ async function clickByText(page, selector, text, timeout = 60000, polling = 500)
   throw new Error(`Timeout clicking element '${selector}' containing text '${text}'`);
 }
 
+// Helper: click an element by XPath containing specific text
+async function clickByXPath(page, xpath, timeout = 5000, polling = 500) {
+  const start = Date.now();
+  while (Date.now() - start < timeout) {
+    const clicked = await page.evaluate(xp => {
+      const result = document.evaluate(xp, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null);
+      const el = result.singleNodeValue;
+      if (el) {
+        el.scrollIntoView();
+        el.click();
+        return true;
+      }
+      return false;
+    }, xpath);
+    if (clicked) return;
+    await new Promise(res => setTimeout(res, polling));
+  }
+  throw new Error(`Timeout clicking XPath: ${xpath}`);
+}
+
 (async () => {
   console.log('[INFO] Starting Puppeteer script...');
 
@@ -98,39 +98,40 @@ async function clickByText(page, selector, text, timeout = 60000, polling = 500)
   async function captureScreenshot(desc) {
     step++;
     const safeDesc = desc.replace(/\s+/g, '-').toLowerCase();
-    const filePath = path.join(artifactsDir, `${String(step).padStart(2,'0')}-${safeDesc}.png`);
+    const filePath = path.join(artifactsDir, `${String(step).padStart(2, '0')}-${safeDesc}.png`);
     console.log(`[INFO] Capturing screenshot #${step}: ${filePath}`);
     if (page) await page.screenshot({ path: filePath, fullPage: true });
   }
 
   try {
+    // Launch browser
     browser = await puppeteer.launch({ headless: true, args: ['--no-sandbox'] });
     page = await browser.newPage();
     page.setDefaultTimeout(60000);
     page.on('console', msg => console.log(`[PAGE ${msg.type().toUpperCase()}] ${msg.text()}`));
 
-    // Step 1
+    // Step 1: Navigate to Gmail
     console.log('[STEP 1] Navigate to Gmail home');
     await page.goto('https://gmail.com', { waitUntil: 'networkidle2', timeout: 60000 });
-    await new Promise(r => setTimeout(r, 5000));
+    await new Promise(res => setTimeout(res, 5000));
     await captureScreenshot('gmail-home');
 
-    // Step 2
+    // Step 2: Click "Create account"
     console.log('[STEP 2] Click "Create account"');
     await clickByText(page, 'a, button, span, div', 'Create account');
     console.log('[INFO] "Create account" clicked');
-    await new Promise(r => setTimeout(r, 5000));
+    await new Promise(res => setTimeout(res, 5000));
     await captureScreenshot('click-create-account');
 
-            // Step 3: Click "For my personal use" using XPath click helper
-    console.log('[STEP 3] Clicking "For my personal use"...');
+    // Step 3: Click "For my personal use"
+    console.log('[STEP 3] Click "For my personal use"');
     const personalXPath = `//span[contains(text(), 'For my personal use')]`;
     await clickByXPath(page, personalXPath, 5000);
-    console.log('[INFO] "For my personal use" clicked.');
-    await new Promise(r => setTimeout(r, 5000));
+    console.log('[INFO] "For my personal use" clicked');
+    await new Promise(res => setTimeout(res, 5000));
     await captureScreenshot('for-personal-use');
 
-    // Step 4
+    // Step 4: Fill in randomly generated names
     const first = getRandom(firstNames);
     const last = getRandom(lastNames);
     console.log(`[STEP 4] Fill names: ${first} ${last}`);
@@ -138,17 +139,17 @@ async function clickByText(page, selector, text, timeout = 60000, polling = 500)
     await page.type('input[name="lastName"]', last, { delay: 100 });
     await captureScreenshot('filled-name');
 
-    // Step 5
+    // Step 5: Click "Next"
     console.log('[STEP 5] Click "Next"');
     await clickByText(page, 'a, button, span, div', 'Next');
     console.log('[INFO] "Next" clicked');
-    await new Promise(r => setTimeout(r, 5000));
+    await new Promise(res => setTimeout(res, 5000));
     await captureScreenshot('after-next');
 
     console.log('[INFO] Script completed successfully');
   } catch (err) {
     console.error('[ERROR]', err);
-    const base = `error-${step.toString().padStart(2,'0')}`;
+    const base = `error-${String(step).padStart(2, '0')}`;
     const shot = path.join(artifactsDir, `${base}.png`);
     const htmlf = path.join(artifactsDir, `${base}.html`);
     if (page) {
