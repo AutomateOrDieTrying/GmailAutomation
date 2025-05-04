@@ -1,32 +1,34 @@
 /**
  * navigate-signup-full-real.js
  *
- * End-to-end Gmail signup flow using puppeteer-real-browser’s connect() API.
- * Replaces the invalid launch() call with connect(), which returns { browser, page }.
+ * End-to-end Gmail signup flow using puppeteer-real-browser.
+ * If at any point a “prove you are not a robot” challenge appears,
+ * the script resets and retries from the beginning (up to MAX_RETRIES).
  * Dumps screenshots + HTML into ./artifacts/ at every step.
  */
 
 const fs = require('fs');
 const path = require('path');
-// Use the connect() API instead of launch()
 const { connect } = require('puppeteer-real-browser');
 
-;(async () => {
+const MAX_RETRIES = 3;
+
+(async () => {
   // — Prepare artifacts directory
-  const artifactsDir = path.resolve(__dirname, 'artifacts');
-  if (!fs.existsSync(artifactsDir)) fs.mkdirSync(artifactsDir);
+  const artifacts = path.resolve(__dirname, 'artifacts');
+  if (!fs.existsSync(artifacts)) fs.mkdirSync(artifacts);
 
   // — Helpers
   const delay = ms => new Promise(res => setTimeout(res, ms));
   const log = (tag, msg) => console.log(`[${new Date().toISOString()}] [${tag}] ${msg}`);
-  const dump = async (name, page) => {
+  async function dump(name, page) {
     const safe = name.replace(/[^a-z0-9]+/gi, '-').toLowerCase();
-    const png  = path.join(artifactsDir, `${safe}.png`);
-    const html = path.join(artifactsDir, `${safe}.html`);
+    const png  = path.join(artifacts, `${safe}.png`);
+    const html = path.join(artifacts, `${safe}.html`);
     log('DUMP', `${name} → ${png}, ${html}`);
     try { await page.screenshot({ path: png, fullPage: true }); } catch (e) { log('ERROR', e.message); }
     try { fs.writeFileSync(html, await page.content()); } catch (e) { log('ERROR', e.message); }
-  };
+  }
   async function clickByText(page, selector, text) {
     const clicked = await page.evaluate((sel, txt) => {
       for (const el of document.querySelectorAll(sel)) {
@@ -40,77 +42,100 @@ const { connect } = require('puppeteer-real-browser');
     }, selector, text);
     if (!clicked) throw new Error(`clickByText("${text}") failed`);
   }
-
-  // --- Connect to a real Chrome instance
-  log('LAUNCH', 'Connecting via puppeteer-real-browser');
-  const { browser, page } = await connect({
-    headless: false,
-    args: ['--no-sandbox', '--disable-setuid-sandbox'],
-    protocolTimeout: 120000,
-    // you can also pass fingerprint: true, turnstile: true, etc.
-  }); // :contentReference[oaicite:0]{index=0}
-
-  try {
-    // 1) Direct to signup
-    log('STEP', 'Goto signup URL');
-    await page.goto(
-      'https://accounts.google.com/signup/v2?service=mail&flowName=GlifWebSignIn&flowEntry=SignUp',
-      { waitUntil: 'networkidle2' }
+  async function detectCaptcha(page) {
+    // common recaptcha iframe or challenge text
+    const url = page.url();
+    if (/recaptcha|captcha|challenge/.test(url)) return true;
+    const hasIframe = await page.$('iframe[src*="recaptcha"], iframe[src*="captcha"]');
+    if (hasIframe) return true;
+    const textPresent = await page.evaluate(() =>
+      /prove you are not a robot|verify|human/i.test(document.body.innerText)
     );
-    await delay(2000);
-    await dump('01-name-form', page);
+    return textPresent;
+  }
 
-    // 2) Name
-    log('STEP', 'Fill name');
-    await page.waitForSelector('input[name="firstName"]', { visible: true });
-    await page.type('input[name="firstName"]', 'Alice', { delay: 100 });
-    await page.type('input[name="lastName"]',  'Example', { delay: 100 });
-    await delay(500);
-    await dump('02-name-filled', page);
-    await clickByText(page, 'button, div[role="button"]', 'Next');
-    await delay(2000);
-    await dump('03-after-name-next', page);
+  // Try the entire flow up to MAX_RETRIES
+  for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+    log('LAUNCH', `Attempt ${attempt}/${MAX_RETRIES}: connecting to real Chrome`);
+    const { browser, page } = await connect({
+      headless: true,
+      args: ['--no-sandbox','--disable-setuid-sandbox'],
+      protocolTimeout: 120000
+    });
+    page.setDefaultTimeout(60000);
 
-    // 3) Birthday/Gender
-    log('STEP', 'Fill birthday & gender');
-    await page.waitForSelector('#month', { visible: true, timeout: 20000 });
-    await page.select('#month', '1');
-    await page.type('#day', '01', { delay: 50 });
-    await page.type('#year','2000', { delay: 50 });
-    await page.select('#gender', '1');
-    await delay(500);
-    await dump('04-birthday-filled', page);
-    await clickByText(page, 'button, div[role="button"]', 'Next');
-    await delay(2000);
-    await dump('05-after-birthday-next', page);
+    try {
+      // Step 1: Go direct to signup
+      log('STEP', 'Navigating to signup URL');
+      await page.goto(
+        'https://accounts.google.com/signup/v2?service=mail&flowName=GlifWebSignIn&flowEntry=SignUp',
+        { waitUntil: 'networkidle2' }
+      );
+      await delay(2000);
+      await dump('01-name-form', page);
+      if (await detectCaptcha(page)) throw new Error('Captcha detected');
 
-    // 4) Username suggestion
-    log('STEP', 'Choose first username suggestion');
-    await page.waitForSelector('div[role="radio"]', { visible: true, timeout: 20000 });
-    await page.evaluate(() => document.querySelectorAll('div[role="radio"]')[0].click());
-    await delay(500);
-    await dump('06-username-selected', page);
-    await clickByText(page, 'button, div[role="button"]', 'Next');
-    await delay(2000);
-    await dump('07-after-username-next', page);
+      // Step 2: Fill name
+      log('STEP', 'Filling name');
+      await page.type('input[name="firstName"]', 'Alice', { delay: 100 });
+      await page.type('input[name="lastName"]',  'Example', { delay: 100 });
+      await delay(500);
+      await dump('02-name-filled', page);
+      await clickByText(page, 'button, div[role="button"]', 'Next');
+      await delay(2000);
+      await dump('03-after-name-next', page);
+      if (await detectCaptcha(page)) throw new Error('Captcha detected');
 
-    // 5) Password
-    log('STEP', 'Fill password');
-    await page.waitForSelector('input[name="Passwd"]', { visible: true, timeout: 20000 });
-    await page.type('input[name="Passwd"]', 'SuperSecret123!', { delay: 50 });
-    await page.type('input[name="PasswdAgain"]', 'SuperSecret123!', { delay: 50 });
-    await delay(500);
-    await dump('08-password-filled', page);
-    // Next button id=createpasswordNext :contentReference[oaicite:2]{index=2}
-    await clickByText(page, 'button, div[role="button"]', 'Next');
-    await delay(2000);
-    await dump('09-after-password-next', page);
+      // Step 3: Birthday/Gender
+      log('STEP', 'Filling birthday & gender');
+      await page.waitForSelector('#month', { visible: true, timeout: 20000 });
+      await page.select('#month', '1');
+      await page.type('#day', '01', { delay: 50 });
+      await page.type('#year','2000', { delay: 50 });
+      await page.select('#gender', '1');
+      await delay(500);
+      await dump('04-birthday-filled', page);
+      await clickByText(page, 'button, div[role="button"]', 'Next');
+      await delay(2000);
+      await dump('05-after-birthday-next', page);
+      if (await detectCaptcha(page)) throw new Error('Captcha detected');
 
-    log('END', 'Signup flow complete up to password step');
-  } catch (err) {
-    log('ERROR', err.stack || err.message);
-    await dump('error', page);
-  } finally {
-    await browser.close();
+      // Step 4: Username suggestion
+      log('STEP', 'Selecting first username suggestion');
+      await page.waitForSelector('div[role="radio"]', { visible: true, timeout: 20000 });
+      await page.evaluate(() => document.querySelectorAll('div[role="radio"]')[0].click());
+      await delay(500);
+      await dump('06-username-selected', page);
+      await clickByText(page, 'button, div[role="button"]', 'Next');
+      await delay(2000);
+      await dump('07-after-username-next', page);
+      if (await detectCaptcha(page)) throw new Error('Captcha detected');
+
+      // Step 5: Password
+      log('STEP', 'Filling password');
+      await page.waitForSelector('input[name="Passwd"]', { visible: true, timeout: 20000 });
+      await page.type('input[name="Passwd"]','SuperSecret123!',{delay:50});
+      await page.type('input[name="PasswdAgain"]','SuperSecret123!',{delay:50});
+      await delay(500);
+      await dump('08-password-filled', page);
+      await clickByText(page, 'button, div[role="button"]', 'Next');
+      await delay(2000);
+      await dump('09-after-password-next', page);
+      if (await detectCaptcha(page)) throw new Error('Captcha detected');
+
+      log('END', 'Flow completed without captcha');
+      await browser.close();
+      return; // success
+    } catch (err) {
+      log('WARN', `Attempt ${attempt} failed: ${err.message}`);
+      await dump(`error-attempt-${attempt}`, page);
+      await browser.close();
+      if (attempt < MAX_RETRIES) {
+        log('INFO', 'Retrying from start...');
+      } else {
+        log('ERROR', 'Max retries reached; exiting');
+        process.exit(1);
+      }
+    }
   }
 })();
