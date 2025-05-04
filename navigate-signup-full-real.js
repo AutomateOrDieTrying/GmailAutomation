@@ -11,7 +11,7 @@ const fs = require('fs');
 const path = require('path');
 const { connect } = require('puppeteer-real-browser');
 
-const MAX_RETRIES = 3000;
+const MAX_RETRIES = 500;
 
 (async () => {
   // — Prepare artifacts directory
