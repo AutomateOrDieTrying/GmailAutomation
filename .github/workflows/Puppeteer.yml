@@ -1,46 +1,43 @@
-name: Puppeteer E2E Tests
+# .github/workflows/signup.yml
+# GitHub Actions workflow to run the Puppeteer signup script against a real browser
+
+name: Gmail Signup CI
 
 on:
   push:
-    branches: [main]
+    branches: [ main ]
   pull_request:
+    branches: [ main ]
 
 jobs:
-  e2e:
+  signup-flow:
     runs-on: ubuntu-latest
 
     steps:
-      # 1. Check out the repository
-      - name: Checkout code
-        uses: actions/checkout@v4
+    - name: Checkout repository
+      uses: actions/checkout@v4
 
-      # 2. Set up Node.js
-      - name: Set up Node.js
-        uses: actions/setup-node@v3
-        with:
-          node-version: '16'
+    - name: Set up Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18'
 
-      # 3. Ensure we have a package.json and install Puppeteer
-      - name: Bootstrap npm & install Puppeteer
-        run: |
-          # If there's no package.json, create a minimal one
-          if [ ! -f package.json ]; then
-            echo '{}' > package.json
-          fi
+    - name: Install dependencies
+      run: npm install puppeteer-real-browser
 
-          # Install puppeteer (without modifying package.json)
-          npm install --no-save puppeteer
+    - name: Launch Chrome
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y chromium-browser
 
-      # 4. Run your Puppeteer script
-      - name: Run Puppeteer script
-        env:
-          DISPLAY: ':99.0'
-        run: node navigate-and-capture.js
+    - name: Run signup script
+      env:
+        PUPPETEER_EXECUTABLE_PATH: /usr/bin/chromium-browser
+      run: |
+        node navigate-signup-full-real.js
 
-      # 5. Upload artifacts no matter what
-      - name: Upload Puppeteer artifacts
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: puppeteer-artifacts
-          path: artifacts/** 
+    - name: Upload artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: signup-artifacts
+        path: artifacts/**
