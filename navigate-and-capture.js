@@ -79,18 +79,16 @@ async function clickByText(page, selector, text, timeout = 60000, polling = 500)
     await new Promise(r => setTimeout(r, 5000));
     await captureScreenshot('click-create-account');
 
-    // Check if landed on name entry page
-    const nameField = await page.$('input[name="firstName"]');
-    if (nameField) {
-      console.log('[INFO] Detected name entry page, skipping "For my personal use" step.');
-    } else {
-      // Step 3: Click "For my personal use"
-      console.log('[STEP 3] Clicking "For my personal use"...');
-      await clickByText(page, 'span, button, div', 'For my personal use');
-      console.log('[INFO] "For my personal use" clicked.');
-      await new Promise(r => setTimeout(r, 5000));
-      await captureScreenshot('for-personal-use');
-    }
+    // Step 3: Click "For my personal use"
+    console.log('[STEP 3] Waiting for "For my personal use" option...');
+    const xpath = `//*[contains(text(), 'For my personal use')]`;
+    await page.waitForXPath(xpath, { timeout: 60000 });
+    const [personalBtn] = await page.$x(xpath);
+    if (!personalBtn) throw new Error('"For my personal use" element not found');
+    await personalBtn.click();
+    console.log('[INFO] "For my personal use" clicked.');
+    await new Promise(r => setTimeout(r, 5000));
+    await captureScreenshot('for-personal-use');
 
     // Step 4: Fill in randomly generated names
     const randomFirst = getRandom(firstNames);
