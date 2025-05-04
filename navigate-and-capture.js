@@ -79,10 +79,12 @@ async function clickByText(page, selector, text, timeout = 60000, polling = 500)
     await new Promise(r => setTimeout(r, 5000));
     await captureScreenshot('click-create-account');
 
-    // Step 3: Click "For my personal use"
-    console.log('[STEP 3] Clicking "For my personal use"...');
-    await clickByText(page, 'span, button, div', 'For my personal use');
+        // Step 3: Click "For my personal use"
+    console.log('[STEP 3] Waiting for "For my personal use" option to appear...');
+    // Scan all elements (*) for the text and click
+    await clickByText(page, '*', 'For my personal use');
     console.log('[INFO] "For my personal use" clicked.');
+    // Allow time for the next form to load
     await new Promise(r => setTimeout(r, 5000));
     await captureScreenshot('for-personal-use');
 
