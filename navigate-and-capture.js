@@ -1,10 +1,10 @@
 /**
  * navigate-and-capture.js
  *
- * A verbose Puppeteer script to navigate the Gmail account creation flow,
+ * A robust Puppeteer script to navigate the Gmail account creation flow,
  * capture screenshots at each step, fill in randomly generated names,
- * and dump HTML on errors, using general text-based selectors and a 5-second fixed wait.
- * Modified to continue motions without strict navigation waits after clicks.
+ * and dump HTML on errors, using general selectors and a 5-second fixed wait.
+ * Dynamically skips the "For my personal use" step if already on name entry page.
  */
 
 const fs = require('fs');
@@ -72,22 +72,27 @@ async function clickByText(page, selector, text, timeout = 60000, polling = 500)
     await new Promise(r => setTimeout(r, 5000));
     await captureScreenshot('gmail-home');
 
-    // Step 2: Click "Create account" and continue without waiting for navigation
+    // Step 2: Click "Create account"
     console.log('[STEP 2] Clicking "Create account"...');
     await clickByText(page, 'a, button, span, div', 'Create account');
     console.log('[INFO] "Create account" clicked.');
     await new Promise(r => setTimeout(r, 5000));
     await captureScreenshot('click-create-account');
 
-                // Step 3: Click "For my personal use" using text-based helper
-    console.log('[STEP 3] Clicking "For my personal use"...');
-    await clickByText(page, 'span, button, div', 'For my personal use');
-    console.log('[INFO] "For my personal use" clicked.');
-    // Allow time for page transition
-    await new Promise(r => setTimeout(r, 5000));
-    await captureScreenshot('for-personal-use');
+    // Check if landed on name entry page
+    const nameField = await page.$('input[name="firstName"]');
+    if (nameField) {
+      console.log('[INFO] Detected name entry page, skipping "For my personal use" step.');
+    } else {
+      // Step 3: Click "For my personal use"
+      console.log('[STEP 3] Clicking "For my personal use"...');
+      await clickByText(page, 'span, button, div', 'For my personal use');
+      console.log('[INFO] "For my personal use" clicked.');
+      await new Promise(r => setTimeout(r, 5000));
+      await captureScreenshot('for-personal-use');
+    }
 
-    // Step 4: Fill in name and Next
+    // Step 4: Fill in randomly generated names
     const randomFirst = getRandom(firstNames);
     const randomLast = getRandom(lastNames);
     console.log(`[STEP 4] Filling first: ${randomFirst}, last: ${randomLast}`);
@@ -95,6 +100,7 @@ async function clickByText(page, selector, text, timeout = 60000, polling = 500)
     await page.type('input[name="lastName"]', randomLast, { delay: 100 });
     await captureScreenshot('filled-name');
 
+    // Step 5: Click "Next"
     console.log('[STEP 5] Clicking "Next"...');
     await clickByText(page, 'span, button, div', 'Next');
     console.log('[INFO] "Next" clicked.');
