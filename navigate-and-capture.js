@@ -4,7 +4,7 @@
  * A verbose Puppeteer script that navigates the Gmail account creation flow,
  * captures screenshots at each step, fills in randomly generated names from
  * popular lists, and dumps HTML on errors. Uses general click helpers and fixed
- * 5-second waits between actions.
+ * 5-second waits between actions. Now handles Shadow DOM for the "For my personal use" step.
  */
 
 const fs = require('fs');
@@ -63,26 +63,6 @@ async function clickByText(page, selector, text, timeout = 60000, polling = 500)
   throw new Error(`Timeout clicking element '${selector}' containing text '${text}'`);
 }
 
-// Helper: click an element by XPath containing specific text
-async function clickByXPath(page, xpath, timeout = 5000, polling = 500) {
-  const start = Date.now();
-  while (Date.now() - start < timeout) {
-    const clicked = await page.evaluate(xp => {
-      const result = document.evaluate(xp, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null);
-      const el = result.singleNodeValue;
-      if (el) {
-        el.scrollIntoView();
-        el.click();
-        return true;
-      }
-      return false;
-    }, xpath);
-    if (clicked) return;
-    await new Promise(res => setTimeout(res, polling));
-  }
-  throw new Error(`Timeout clicking XPath: ${xpath}`);
-}
-
 (async () => {
   console.log('[INFO] Starting Puppeteer script...');
 
@@ -123,20 +103,30 @@ async function clickByXPath(page, xpath, timeout = 5000, polling = 500) {
     await new Promise(res => setTimeout(res, 5000));
     await captureScreenshot('click-create-account');
 
-        // Step 3: Click "For my personal use" option
-    console.log('[STEP 3] Click "For my personal use" option');
-    // Wait for choice container to appear
-    await page.waitForSelector('div[data-button-type="multipleChoiceIdentifier"]', { visible: true, timeout: 10000 });
-    // Find and click the correct option by its inner text
+    // Step 3: Click "For my personal use" via Shadow DOM
+    console.log('[STEP 3] Clicking "For my personal use" option');
+    // Wait for the Gmail signup component to hydrate
+    await page.waitForSelector('c-wiz[jscontroller="hc6Ubd"]', { visible: true, timeout: 30000 });
+    // Traverse Shadow DOM to locate and click the option
     await page.evaluate(() => {
-      const choices = Array.from(document.querySelectorAll('div[data-button-type="multipleChoiceIdentifier"]'));
-      const target = choices.find(el => el.innerText && el.innerText.includes('For my personal use'));
-      if (!target) throw new Error('"For my personal use" option not found');
-      target.scrollIntoView();
-      target.click();
+      const wizards = Array.from(document.querySelectorAll('c-wiz[jscontroller="hc6Ubd"]'));
+      for (const wiz of wizards) {
+        const root = wiz.shadowRoot;
+        if (!root) continue;
+        const span = Array.from(root.querySelectorAll('span')).find(s =>
+          s.innerText.trim() === 'For my personal use'
+        );
+        if (span) {
+          const clickable = span.closest('button, div');
+          if (!clickable) throw new Error('Clickable container not found');
+          clickable.scrollIntoView();
+          clickable.click();
+          return;
+        }
+      }
+      throw new Error('"For my personal use" not found in Shadow DOM');
     });
     console.log('[INFO] "For my personal use" clicked');
-    // Allow time for the next form to load
     await new Promise(res => setTimeout(res, 5000));
     await captureScreenshot('for-personal-use');
 
@@ -163,7 +153,7 @@ async function clickByXPath(page, xpath, timeout = 5000, polling = 500) {
     const htmlf = path.join(artifactsDir, `${base}.html`);
     if (page) {
       await page.screenshot({ path: shot, fullPage: true });
-      fs.writeFileSync(htmlf, await page.content());
+      fs.writeFileSync(htmlf, page.content());
     }
     process.exit(1);
   } finally {
