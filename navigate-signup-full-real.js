@@ -44,7 +44,7 @@ const { connect } = require('puppeteer-real-browser');
   // --- Connect to a real Chrome instance
   log('LAUNCH', 'Connecting via puppeteer-real-browser');
   const { browser, page } = await connect({
-    headless: true,
+    headless: false,
     args: ['--no-sandbox', '--disable-setuid-sandbox'],
     protocolTimeout: 120000,
     // you can also pass fingerprint: true, turnstile: true, etc.
