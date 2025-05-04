@@ -1,126 +1,179 @@
 /**
- * navigate-and-debug-verbose.js
+ * navigate-and-capture.js
  *
- * Ultra-verbose Puppeteer flow to nail down why “For my personal use” isn’t clicking.
- * Now uses a simple delay() helper instead of page.waitForTimeout().
+ * A verbose Puppeteer script that navigates the Gmail account creation flow,
+ * captures screenshots at each step, fills in randomly generated names from
+ * popular lists, and dumps HTML on errors. Fixed selector syntax for “For my personal use”.
  */
 
 const fs = require('fs');
 const path = require('path');
 const puppeteer = require('puppeteer');
 
+// Lists of the 100 most popular first and last names (U.S. data)
+const firstNames = [
+  'James','Mary','John','Patricia','Robert','Jennifer','Michael','Linda','William','Elizabeth',
+  'David','Barbara','Richard','Susan','Joseph','Jessica','Thomas','Sarah','Charles','Karen',
+  'Christopher','Nancy','Daniel','Lisa','Matthew','Betty','Anthony','Dorothy','Donald','Sandra',
+  'Mark','Ashley','Paul','Kimberly','Steven','Emily','Andrew','Donna','Kenneth','Michelle',
+  'George','Carol','Joshua','Amanda','Kevin','Melissa','Brian','Deborah','Edward','Stephanie',
+  'Ronald','Rebecca','Timothy','Sharon','Jason','Laura','Jeffrey','Cynthia','Ryan','Kathleen',
+  'Jacob','Amy','Gary','Shirley','Nicholas','Angela','Eric','Helen','Jonathan','Anna',
+  'Stephen','Brenda','Larry','Pamela','Justin','Nicole','Scott','Emma','Brandon','Samantha',
+  'Benjamin','Katherine','Samuel','Christine','Frank','Debra','Gregory','Rachel','Raymond','Catherine',
+  'Alexander','Carolyn','Patrick','Janet','Jack','Ruth','Dennis','Maria','Jerry','Heather'
+];
+
+const lastNames = [
+  'Smith','Johnson','Williams','Brown','Jones','Garcia','Miller','Davis','Rodriguez','Martinez',
+  'Hernandez','Lopez','Gonzalez','Wilson','Anderson','Thomas','Taylor','Moore','Jackson','Martin',
+  'Lee','Perez','Thompson','White','Harris','Sanchez','Clark','Ramirez','Lewis','Robinson',
+  'Walker','Young','Allen','King','Wright','Scott','Torres','Nguyen','Hill','Flores',
+  'Green','Adams','Nelson','Baker','Hall','Rivera','Campbell','Mitchell','Carter','Roberts',
+  'Gomez','Phillips','Evans','Turner','Diaz','Parker','Cruz','Edwards','Collins','Reyes',
+  'Stewart','Morris','Morales','Murphy','Cook','Rogers','Gutierrez','Ortiz','Morgan','Cooper',
+  'Peterson','Bailey','Reed','Kelly','Howard','Ramos','Kim','Cox','Ward','Richardson',
+  'Watson','Brooks','Chavez','Wood','James','Bennett','Gray','Mendoza','Ruiz','Hughes',
+  'Price','Alvarez','Castillo','Sanders','Patel','Myers','Long','Ross','Foster','Jimenez'
+];
+
+// Helper: get a random element from an array
+function getRandom(arr) {
+  return arr[Math.floor(Math.random() * arr.length)];
+}
+
+// Helper: click an element by CSS selector containing specific text
+async function clickByText(page, selector, text, timeout = 60000, polling = 500) {
+  const start = Date.now();
+  while (Date.now() - start < timeout) {
+    const clicked = await page.evaluate((sel, txt) => {
+      const elements = Array.from(document.querySelectorAll(sel));
+      const target = elements.find(el => el.innerText.trim().includes(txt));
+      if (target) {
+        target.scrollIntoView();
+        target.click();
+        return true;
+      }
+      return false;
+    }, selector, text);
+    if (clicked) return;
+    await new Promise(res => setTimeout(res, polling));
+  }
+  throw new Error(`Timeout clicking element '${selector}' containing text '${text}'`);
+}
+
+// Helper: click an element by XPath containing specific text
+async function clickByXPath(page, xpath, timeout = 5000, polling = 500) {
+  const start = Date.now();
+  while (Date.now() - start < timeout) {
+    const clicked = await page.evaluate(xp => {
+      const result = document.evaluate(xp, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null);
+      const el = result.singleNodeValue;
+      if (el) {
+        el.scrollIntoView();
+        el.click();
+        return true;
+      }
+      return false;
+    }, xpath);
+    if (clicked) return;
+    await new Promise(res => setTimeout(res, polling));
+  }
+  throw new Error(`Timeout clicking XPath: ${xpath}`);
+}
+
 (async () => {
-  // --- Setup artifacts dir
-  const artifacts = path.resolve(__dirname, 'debug-artifacts');
-  if (!fs.existsSync(artifacts)) fs.mkdirSync(artifacts);
+  console.log('[INFO] Starting Puppeteer script...');
 
-  // --- Utility: timestamped logging
-  function log(tag, msg) {
-    const time = new Date().toISOString();
-    console.log(`[${time}] [${tag}] ${msg}`);
+  // Prepare artifacts directory
+  const artifactsDir = path.resolve(__dirname, 'artifacts');
+  if (!fs.existsSync(artifactsDir)) {
+    fs.mkdirSync(artifactsDir);
   }
 
-  // --- Utility: delay
-  const delay = ms => new Promise(res => setTimeout(res, ms));
+  let browser;
+  let page;
+  let step = 0;
 
-  // --- Utility: screenshot + HTML dump
-  async function dump(step) {
-    const safeStep = step.replace(/[^a-z0-9\-]/gi, '-').toLowerCase();
-    const png = path.join(artifacts, `${safeStep}.png`);
-    const html = path.join(artifacts, `${safeStep}.html`);
-    log('DUMP', `${step} → ${png}, ${html}`);
-    try {
-      await page.screenshot({ path: png, fullPage: true });
-    } catch (e) {
-      log('ERROR', `screenshot failed: ${e.message}`);
+  // Helper: capture screenshot
+  async function captureScreenshot(desc) {
+    step++;
+    const safeDesc = desc.replace(/\s+/g, '-').toLowerCase();
+    const fileName = `${String(step).padStart(2, '0')}-${safeDesc}.png`;
+    const filePath = path.join(artifactsDir, fileName);
+    console.log(`[INFO] Capturing screenshot #${step}: ${filePath}`);
+    if (page) {
+      await page.screenshot({ path: filePath, fullPage: true });
     }
-    fs.writeFileSync(html, await page.content());
   }
-
-  // --- Launch
-  log('START', 'Launching Puppeteer');
-  const browser = await puppeteer.launch({ headless: true, args: ['--no-sandbox'] });
-  const page = await browser.newPage();
-  page.setDefaultTimeout(30000);
-  page.on('console', msg => log('PAGE', msg.text()));
 
   try {
-    // 1) Go to Gmail
-    log('STEP', 'Navigating to https://gmail.com');
-    await page.goto('https://gmail.com', { waitUntil: 'networkidle2' });
-    await delay(3000);
-    await dump('gmail-home');
+    // Launch browser
+    browser = await puppeteer.launch({ headless: true, args: ['--no-sandbox'] });
+    page = await browser.newPage();
+    page.setDefaultTimeout(60000);
+    page.on('console', msg => console.log(`[PAGE ${msg.type().toUpperCase()}] ${msg.text()}`));
 
-    // 2) Click "Create account"
-    log('STEP', 'Clicking “Create account”');
+    // Step 1: Navigate to Gmail
+    console.log('[STEP 1] Navigate to Gmail home');
+    await page.goto('https://gmail.com', { waitUntil: 'networkidle2', timeout: 60000 });
+    await new Promise(res => setTimeout(res, 5000));
+    await captureScreenshot('gmail-home');
+
+    // Step 2: Click "Create account"
+    console.log('[STEP 2] Click "Create account"');
+    await clickByText(page, 'a, button, span, div', 'Create account');
+    console.log('[INFO] "Create account" clicked');
+    await new Promise(res => setTimeout(res, 5000));
+    await captureScreenshot('click-create-account');
+
+    // Step 3: Click "For my personal use" option
+    console.log('[STEP 3] Click "For my personal use" option');
+    // Wait for choice container to appear
+    await page.waitForSelector('div[data-button-type="multipleChoiceIdentifier"]', { visible: true, timeout: 10000 });
+    // Find and click the correct option by its inner text
     await page.evaluate(() => {
-      const btn = Array.from(document.querySelectorAll('a, button, div, span'))
-        .find(el => /create account/i.test(el.innerText));
-      if (!btn) throw new Error('Create account not found');
-      btn.scrollIntoView();
-      btn.click();
+      const choices = Array.from(
+        document.querySelectorAll('div[data-button-type="multipleChoiceIdentifier"]')
+      );
+      const target = choices.find(el => el.innerText && el.innerText.includes('For my personal use'));
+      if (!target) throw new Error('"For my personal use" option not found');
+      target.scrollIntoView();
+      target.click();
     });
-    await delay(4000);
-    await dump('after-create-account');
+    console.log('[INFO] "For my personal use" clicked');
+    await new Promise(res => setTimeout(res, 5000));
+    await captureScreenshot('for-personal-use');
 
-    // 3) Wait for choice container
-    log('STEP', 'Waiting for choice container selector');
-    await page.waitForSelector('div[data-button-type="multipleChoiceIdentifier"]', { visible: true });
-    await delay(1000);
-    await dump('choice-container');
+    // Step 4: Fill in randomly generated names
+    const first = getRandom(firstNames);
+    const last = getRandom(lastNames);
+    console.log(`[STEP 4] Fill names: ${first} ${last}`);
+    await page.type('input[name="firstName"]', first, { delay: 100 });
+    await page.type('input[name="lastName"]', last, { delay: 100 });
+    await captureScreenshot('filled-name');
 
-    // 4) Enumerate all candidate options
-    const candidates = await page.$$eval(
-      'div[data-button-type="multipleChoiceIdentifier"]',
-      els => els.map((el, i) => ({
-        index: i,
-        text: el.innerText.trim(),
-        html: el.outerHTML.slice(0,200).replace(/\s+/g,' ')
-      }))
-    );
-    log('CANDIDATES', JSON.stringify(candidates, null, 2));
+    // Step 5: Click "Next"
+    console.log('[STEP 5] Click "Next"');
+    await clickByText(page, 'a, button, span, div', 'Next');
+    console.log('[INFO] "Next" clicked');
+    await new Promise(res => setTimeout(res, 5000));
+    await captureScreenshot('after-next');
 
-    // 5) Define click attempts
-    const attempts = [
-      {
-        name: 'innerText-click',
-        fn: async () => {
-          log('TRY', 'innerText-click');
-          await page.evaluate(() => {
-            const els = Array.from(document.querySelectorAll('div[data-button-type="multipleChoiceIdentifier"]'));
-            const tgt = els.find(el => /for my personal use/i.test(el.innerText));
-            if (!tgt) throw new Error('not found by innerText-click');
-            tgt.scrollIntoView();
-            tgt.click();
-          });
-        }
-      },
-      {
-        name: 'clickByText-helper',
-        fn: async () => {
-          log('TRY', 'clickByText-helper');
-          await page.evaluate(() => {
-            const clickByText = (sel, re) => {
-              const els = Array.from(document.querySelectorAll(sel));
-              const t = els.find(e => re.test(e.innerText));
-              if (!t) throw new Error('helper no match');
-              t.scrollIntoView();
-              t.click();
-            };
-            clickByText('div[data-button-type="multipleChoiceIdentifier"]', /for my personal use/i);
-          });
-        }
-      },
-      {
-        name: 'data-value-click',
-        fn: async () => {
-          log('TRY', 'data-value-click');
-          await page.click('div[data-button-type="multipleChoiceIdentifier"][data-value="For my personal use"]');
-        }
-      },
-      {
-        name: 'attribute-contains-click',
-        fn: async () => {
-          log('TRY', 'attribute-contains-click');
-          await page.evaluate(() => {
-            const els = Array.from(document.querySelectorAll('div[data-button-type]()
+    console.log('[INFO] Script completed successfully');
+  } catch (err) {
+    console.error('[ERROR]', err);
+    const base = `error-${String(step).padStart(2, '0')}`;
+    const shot = path.join(artifactsDir, `${base}.png`);
+    const htmlf = path.join(artifactsDir, `${base}.html`);
+    if (page) {
+      await page.screenshot({ path: shot, fullPage: true });
+      fs.writeFileSync(htmlf, await page.content());
+    }
+    process.exit(1);
+  } finally {
+    if (browser) {
+      await browser.close();
+    }
+  }
+})();
