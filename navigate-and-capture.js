@@ -79,33 +79,11 @@ async function clickByText(page, selector, text, timeout = 60000, polling = 500)
     await new Promise(r => setTimeout(r, 5000));
     await captureScreenshot('click-create-account');
 
-            // Step 3: Click "For my personal use" with selector fallbacks
-    console.log('[STEP 3] Attempting to click "For my personal use"...');
-    const personalUseSelectors = [
-      { type: 'css', value: 'span[jsname="K4r5Ff"]' },
-      { type: 'xpath', value: `//span[contains(text(), 'For my personal use')]` }
-    ];
-    let clicked = false;
-    for (const { type, value } of personalUseSelectors) {
-      try {
-        console.log(`[INFO] Trying ${type.toUpperCase()} selector: ${value}`);
-        if (type === 'css') {
-          await page.waitForSelector(value, { timeout: 60000 });
-          await page.click(value);
-        } else {
-          const [el] = await page.$x(value);
-          if (!el) throw new Error('Element not found');
-          await el.click();
-        }
-        console.log('[INFO] "For my personal use" clicked.');
-        clicked = true;
-        break;
-      } catch (err) {
-        console.warn(`[WARN] Selector failed (${type}): ${err.message}`);
-      }
-    }
-    if (!clicked) throw new Error('Unable to click "For my personal use"');
-    console.log('[INFO] Waiting for 5 seconds after clicking...');
+                // Step 3: Click "For my personal use" using text-based helper
+    console.log('[STEP 3] Clicking "For my personal use"...');
+    await clickByText(page, 'span, button, div', 'For my personal use');
+    console.log('[INFO] "For my personal use" clicked.');
+    // Allow time for page transition
     await new Promise(r => setTimeout(r, 5000));
     await captureScreenshot('for-personal-use');
 
