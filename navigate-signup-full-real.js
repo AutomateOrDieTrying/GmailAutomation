@@ -63,8 +63,8 @@ const { connect } = require('puppeteer-real-browser');
     // 2) Name
     log('STEP', 'Fill name');
     await page.waitForSelector('input[name="firstName"]', { visible: true });
-    await page.type('input[name="firstName"]', 'Oliver', { delay: 100 });
-    await page.type('input[name="lastName"]',  'Smith', { delay: 100 });
+    await page.type('input[name="firstName"]', 'Alice', { delay: 100 });
+    await page.type('input[name="lastName"]',  'Example', { delay: 100 });
     await delay(500);
     await dump('02-name-filled', page);
     await clickByText(page, 'button, div[role="button"]', 'Next');
