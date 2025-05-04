@@ -2,7 +2,7 @@
  * navigate-signup-full-real.js
  *
  * End-to-end Gmail signup flow using puppeteer-real-browser.
- * If at any point a “prove you are not a robot” challenge appears,
+ * If at any point a “confirm you're not a robot” challenge appears,
  * the script resets and retries from the beginning (up to MAX_RETRIES).
  * Dumps screenshots + HTML into ./artifacts/ at every step.
  */
@@ -49,7 +49,7 @@ const MAX_RETRIES = 3;
     const hasIframe = await page.$('iframe[src*="recaptcha"], iframe[src*="captcha"]');
     if (hasIframe) return true;
     const textPresent = await page.evaluate(() =>
-      /prove you are not a robot|verify|human/i.test(document.body.innerText)
+      /confirm you're not a robot|verify|human/i.test(document.body.innerText)
     );
     return textPresent;
   }
