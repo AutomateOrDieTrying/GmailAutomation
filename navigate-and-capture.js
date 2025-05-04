@@ -2,26 +2,34 @@
  * navigate-and-capture.js
  *
  * A verbose Puppeteer script to navigate the Gmail account creation flow,
- * capture screenshots at each step, and dump HTML on errors, using general selectors,
- * a 5-second sleep after each navigation, and a custom waitForXPath fallback for
- * environments where page.waitForXPath is unavailable.
+ * capture screenshots at each step, and dump HTML on errors, using general
+ * text-based selectors and a 5-second fixed wait after each navigation.
  */
 
 const fs = require('fs');
 const path = require('path');
 const puppeteer = require('puppeteer');
 
-// Custom helper: wait for XPath with polling
-async function waitForXPath(page, xpath, timeout = 60000, polling = 500) {
+// Custom helper: click an element matching selector whose text contains given substring
+async function clickByText(page, selector, text, timeout = 60000, polling = 500) {
   const start = Date.now();
   while (Date.now() - start < timeout) {
-    const elements = await page.$x(xpath);
-    if (elements.length > 0) {
-      return elements;
+    const clicked = await page.evaluate((sel, txt) => {
+      const elements = Array.from(document.querySelectorAll(sel));
+      const target = elements.find(el => el.innerText.trim().includes(txt));
+      if (target) {
+        target.scrollIntoView();
+        target.click();
+        return true;
+      }
+      return false;
+    }, selector, text);
+    if (clicked) {
+      return;
     }
     await new Promise(res => setTimeout(res, polling));
   }
-  throw new Error(`Timeout waiting for XPath: ${xpath}`);
+  throw new Error(`Timeout clicking element '${selector}' containing text '${text}'`);
 }
 
 (async () => {
@@ -54,13 +62,11 @@ async function waitForXPath(page, xpath, timeout = 60000, polling = 500) {
   }
 
   try {
-    console.log('[INFO] Launching browser with default settings...');
+    console.log('[INFO] Launching browser...');
     browser = await puppeteer.launch({ headless: true, args: ['--no-sandbox'] });
-    console.log('[INFO] Browser launched.');
-
     page = await browser.newPage();
     page.setDefaultTimeout(60000);
-    console.log('[INFO] New page created with default timeout set to 60000ms.');
+    console.log('[INFO] Browser and page initialized.');
 
     // Log page console messages
     page.on('console', msg => console.log(`[PAGE ${msg.type().toUpperCase()}] ${msg.text()}`));
@@ -75,10 +81,8 @@ async function waitForXPath(page, xpath, timeout = 60000, polling = 500) {
 
     // Step 2: Click "Create account"
     console.log('[STEP 2] Attempting to click "Create account"...');
-    const createAccountXPath = `//a[contains(text(), 'Create account')]`;
-    const [createEl] = await waitForXPath(page, createAccountXPath, 60000);
-    console.log('[INFO] "Create account" element found. Clicking...');
-    await createEl.click();
+    await clickByText(page, 'a', 'Create account');
+    console.log('[INFO] "Create account" clicked.');
     await page.waitForNavigation({ waitUntil: 'networkidle0', timeout: 60000 });
     console.log(`[INFO] After click, navigated to: ${page.url()}`);
     console.log('[INFO] Waiting for 5 seconds after navigation...');
@@ -87,10 +91,8 @@ async function waitForXPath(page, xpath, timeout = 60000, polling = 500) {
 
     // Step 3: Click "For my personal use"
     console.log('[STEP 3] Attempting to click "For my personal use"...');
-    const personalUseXPath = `//span[contains(text(), 'For my personal use')]`;
-    const [personalEl] = await waitForXPath(page, personalUseXPath, 60000);
-    console.log('[INFO] "For my personal use" element found. Clicking...');
-    await personalEl.click();
+    await clickByText(page, 'span, button, div', 'For my personal use');
+    console.log('[INFO] "For my personal use" clicked.');
     await page.waitForNavigation({ waitUntil: 'networkidle0', timeout: 60000 });
     console.log(`[INFO] After click, navigated to: ${page.url()}`);
     console.log('[INFO] Waiting for 5 seconds after navigation...');
