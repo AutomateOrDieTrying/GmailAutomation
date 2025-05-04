@@ -4,7 +4,7 @@
  * A verbose Puppeteer script that navigates the Gmail account creation flow,
  * captures screenshots at each step, fills in randomly generated names from
  * popular lists, and dumps HTML on errors. Uses general click helpers and fixed
- * 5-second waits between actions. Now handles Shadow DOM for the "For my personal use" step.
+ * 5-second waits between actions.
  */
 
 const fs = require('fs');
@@ -63,6 +63,26 @@ async function clickByText(page, selector, text, timeout = 60000, polling = 500)
   throw new Error(`Timeout clicking element '${selector}' containing text '${text}'`);
 }
 
+// Helper: click an element by XPath containing specific text
+async function clickByXPath(page, xpath, timeout = 5000, polling = 500) {
+  const start = Date.now();
+  while (Date.now() - start < timeout) {
+    const clicked = await page.evaluate(xp => {
+      const result = document.evaluate(xp, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null);
+      const el = result.singleNodeValue;
+      if (el) {
+        el.scrollIntoView();
+        el.click();
+        return true;
+      }
+      return false;
+    }, xpath);
+    if (clicked) return;
+    await new Promise(res => setTimeout(res, polling));
+  }
+  throw new Error(`Timeout clicking XPath: ${xpath}`);
+}
+
 (async () => {
   console.log('[INFO] Starting Puppeteer script...');
 
@@ -92,17 +112,38 @@ async function clickByText(page, selector, text, timeout = 60000, polling = 500)
 
     // Step 1: Navigate to Gmail
     console.log('[STEP 1] Navigate to Gmail home');
-    await page.goto(
-      'https://accounts.google.com/lifecycle/steps/signup/name?continue=https://mail.google.com/mail/&dsh=S469810587:1746362153014205&ec=asw-gmail-hero-create&flowEntry=SignUp&flowName=GlifWebSignIn&service=mail&theme=glif&TL=AArrULToupj0BCz6KalCVuNuXqMJL4lNTLAhxJBFdyGM71IjAbvipH4yecNH8yfl', { waitUntil: 'networkidle2', timeout: 60000 });
+    await page.goto('https://gmail.com', { waitUntil: 'networkidle2', timeout: 60000 });
     await new Promise(res => setTimeout(res, 5000));
     await captureScreenshot('gmail-home');
 
-        
+    // Step 2: Click "Create account"
+    console.log('[STEP 2] Click "Create account"');
+    await clickByText(page, 'a, button, span, div', 'Create account');
+    console.log('[INFO] "Create account" clicked');
+    await new Promise(res => setTimeout(res, 5000));
+    await captureScreenshot('click-create-account');
 
-        // Step 2: Fill in randomly generated names
+        // Step 3: Click "For my personal use" option
+    console.log('[STEP 3] Click "For my personal use" option');
+    // Wait for choice container to appear
+    await page.waitForSelector('div[data-button-type="multipleChoiceIdentifier"]', { visible: true, timeout: 10000 });
+    // Find and click the correct option by its inner text
+    await page.evaluate(() => {
+      const choices = Array.from(document.querySelectorAll('div[data-button-type="multipleChoiceIdentifier"]'));
+      const target = choices.find(el => el.innerText && el.innerText.includes('For my personal use'));
+      if (!target) throw new Error('"For my personal use" option not found');
+      target.scrollIntoView();
+      target.click();
+    });
+    console.log('[INFO] "For my personal use" clicked');
+    // Allow time for the next form to load
+    await new Promise(res => setTimeout(res, 5000));
+    await captureScreenshot('for-personal-use');
+
+    // Step 4: Fill in randomly generated names
     const first = getRandom(firstNames);
     const last = getRandom(lastNames);
-    console.log(`[STEP 2] Fill names: ${first} ${last}`);
+    console.log(`[STEP 4] Fill names: ${first} ${last}`);
     await page.type('input[name="firstName"]', first, { delay: 100 });
     await page.type('input[name="lastName"]', last, { delay: 100 });
     await captureScreenshot('filled-name');
@@ -122,7 +163,7 @@ async function clickByText(page, selector, text, timeout = 60000, polling = 500)
     const htmlf = path.join(artifactsDir, `${base}.html`);
     if (page) {
       await page.screenshot({ path: shot, fullPage: true });
-      fs.writeFileSync(htmlf, page.content());
+      fs.writeFileSync(htmlf, await page.content());
     }
     process.exit(1);
   } finally {
