@@ -92,23 +92,17 @@ async function clickByText(page, selector, text, timeout = 60000, polling = 500)
 
     // Step 1: Navigate to Gmail
     console.log('[STEP 1] Navigate to Gmail home');
-    await page.goto('https://gmail.com', { waitUntil: 'networkidle2', timeout: 60000 });
+    await page.goto(
+      'https://accounts.google.com/lifecycle/steps/signup/name?continue=https://mail.google.com/mail/&dsh=S469810587:1746362153014205&ec=asw-gmail-hero-create&flowEntry=SignUp&flowName=GlifWebSignIn&service=mail&theme=glif&TL=AArrULToupj0BCz6KalCVuNuXqMJL4lNTLAhxJBFdyGM71IjAbvipH4yecNH8yfl', { waitUntil: 'networkidle2', timeout: 60000 });
     await new Promise(res => setTimeout(res, 5000));
     await captureScreenshot('gmail-home');
 
-        // Step 2: Navigate directly to name entry page
-    console.log('[STEP 2] Navigating directly to the signup name entry page');
-    await page.goto(
-      'https://accounts.google.com/lifecycle/steps/signup/name?continue=https://mail.google.com/mail/&dsh=S405159773:1746361887328227&ec=asw-gmail-hero-create&flowEntry=SignUp&flowName=GlifWebSignIn&service=mail&theme=glif&TL=AArrULS-B3b39IRxb4kbTeirVYZT120L2yMyM6i684hVbUfA8E3k49jKBKQEUxOq',
-      { waitUntil: 'networkidle2', timeout: 60000 }
-    );
-    await new Promise(res => setTimeout(res, 5000));
-    await captureScreenshot('signup-name-page');
+        
 
-    // Step 3: Fill in randomly generated names: Fill in randomly generated names
+        // Step 2: Fill in randomly generated names
     const first = getRandom(firstNames);
     const last = getRandom(lastNames);
-    console.log(`[STEP 4] Fill names: ${first} ${last}`);
+    console.log(`[STEP 2] Fill names: ${first} ${last}`);
     await page.type('input[name="firstName"]', first, { delay: 100 });
     await page.type('input[name="lastName"]', last, { delay: 100 });
     await captureScreenshot('filled-name');
