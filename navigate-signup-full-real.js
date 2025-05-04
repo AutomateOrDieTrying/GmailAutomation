@@ -58,7 +58,7 @@ const MAX_RETRIES = 3;
   for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
     log('LAUNCH', `Attempt ${attempt}/${MAX_RETRIES}: connecting to real Chrome`);
     const { browser, page } = await connect({
-      headless: true,
+      headless: false,
       args: ['--no-sandbox','--disable-setuid-sandbox'],
       protocolTimeout: 120000
     });
