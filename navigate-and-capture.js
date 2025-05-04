@@ -3,8 +3,7 @@
  *
  * Puppeteer script to exhaustively try every way to click the
  * “For my personal use” button on the Gmail “Create account” flow.
- * Handles errors at every step, logs detailed success/failure for each strategy,
- * and dumps screenshots + HTML for inspection.
+ * Now with longer timeouts and explicit error-handling on launch.
  */
 
 const fs = require('fs');
@@ -23,7 +22,7 @@ const puppeteer = require('puppeteer');
   }
   async function dump(step, page) {
     const safe = step.replace(/[^a-z0-9]+/gi, '-').toLowerCase();
-    const png = path.join(artifacts, `${safe}.png`);
+    const png  = path.join(artifacts, `${safe}.png`);
     const html = path.join(artifacts, `${safe}.html`);
     log('DUMP', `${step} → ${png}, ${html}`);
     try { await page.screenshot({ path: png, fullPage: true }); }
@@ -31,11 +30,23 @@ const puppeteer = require('puppeteer');
     fs.writeFileSync(html, await page.content());
   }
 
-  // --- Launch
-  log('START', 'Launching Puppeteer');
-  const browser = await puppeteer.launch({ headless: true, args: ['--no-sandbox'] });
+  // --- Launch Puppeteer with extended timeouts
+  let browser;
+  log('LAUNCH', 'Launching browser with extended timeouts...');
+  try {
+    browser = await puppeteer.launch({
+      headless: true,
+      args: ['--no-sandbox'],
+      timeout: 60000,           // 60 s to establish the browser process
+      protocolTimeout: 120000,  // 120 s for CDP protocol commands
+    });
+  } catch (err) {
+    log('ERROR', `Browser launch failed: ${err.message}`);
+    process.exit(1);
+  }
+
   const page = await browser.newPage();
-  page.setDefaultTimeout(30000);
+  page.setDefaultTimeout(30000); // 30 s for all page.* calls
   page.on('console', msg => log('PAGE', msg.text()));
 
   try {
@@ -48,7 +59,7 @@ const puppeteer = require('puppeteer');
     // Step 2: Click "Create account"
     log('STEP', 'Clicking "Create account"');
     await page.evaluate(() => {
-      const btn = Array.from(document.querySelectorAll('a, button, div, span'))
+      const btn = Array.from(document.querySelectorAll('a,button,div,span'))
         .find(el => /create account/i.test(el.innerText));
       if (!btn) throw new Error('"Create account" not found');
       btn.scrollIntoView();
@@ -57,19 +68,19 @@ const puppeteer = require('puppeteer');
     await delay(4000);
     await dump('after-create-account', page);
 
-    // Step 3: Wait for choice container
-    log('STEP', 'Waiting for multipleChoiceIdentifier container');
+    // Step 3: Wait for the choice container
+    log('STEP', 'Waiting for choice container to appear');
     await page.waitForSelector('div[data-button-type="multipleChoiceIdentifier"]', { visible: true });
     await delay(1000);
     await dump('choice-container', page);
 
-    // Enumerate candidate elements
+    // Enumerate the options rendered
     const candidates = await page.$$eval(
       'div[data-button-type="multipleChoiceIdentifier"]',
-      els => els.map((el, i) => ({
+      els => els.map((el,i) => ({
         index: i,
         text: el.innerText.trim(),
-        outer: el.outerHTML.slice(0,200).replace(/\s+/g,' ')
+        snippet: el.outerHTML.slice(0,200).replace(/\s+/g,' ')
       }))
     );
     log('CANDIDATES', JSON.stringify(candidates, null, 2));
@@ -79,15 +90,15 @@ const puppeteer = require('puppeteer');
       {
         name: 'inner-text-click',
         fn: async () => {
-          const ok = await page.evaluate(() => {
+          const succeeded = await page.evaluate(() => {
             const els = Array.from(document.querySelectorAll('div[data-button-type="multipleChoiceIdentifier"]'));
-            const tgt = els.find(el => /for my personal use/i.test(el.innerText));
-            if (!tgt) return false;
-            tgt.scrollIntoView();
-            tgt.click();
+            const t = els.find(el => /for my personal use/i.test(el.innerText));
+            if (!t) return false;
+            t.scrollIntoView();
+            t.click();
             return true;
           });
-          if (!ok) throw new Error('inner-text-click: no matching element');
+          if (!succeeded) throw new Error('No matching element by inner-text');
         }
       },
       {
@@ -107,7 +118,7 @@ const puppeteer = require('puppeteer');
             t.click();
             return true;
           });
-          if (!ok) throw new Error('attribute-contains-click: no matching element');
+          if (!ok) throw new Error('No matching element by attribute-contains');
         }
       },
       {
@@ -116,7 +127,7 @@ const puppeteer = require('puppeteer');
           const handles = await page.$x(
             "//div[@data-button-type='multipleChoiceIdentifier' and contains(normalize-space(.),'For my personal use')]"
           );
-          if (!handles.length) throw new Error('xpath-click: no nodes found');
+          if (!handles.length) throw new Error('XPath matched 0 nodes');
           await handles[0].evaluate(el => el.scrollIntoView());
           await handles[0].click();
         }
@@ -138,21 +149,20 @@ const puppeteer = require('puppeteer');
             );
             return true;
           });
-          if (!ok) throw new Error('mouse-event-click: no target found');
+          if (!ok) throw new Error('MouseEvent dispatch failed');
         }
       },
       {
         name: 'nth-child-click',
         fn: async () => {
           const els = await page.$$('div[data-button-type="multipleChoiceIdentifier"]');
-          if (els.length < 2) throw new Error('nth-child-click: not enough elements');
+          if (els.length < 2) throw new Error('Not enough elements for nth-child');
           await els[1].click();
         }
       },
       {
         name: 'keyboard-nav-enter',
         fn: async () => {
-          // Attempt to tab+enter into the option
           await page.keyboard.press('Tab');
           await page.keyboard.press('Tab');
           await page.keyboard.press('Enter');
@@ -162,16 +172,16 @@ const puppeteer = require('puppeteer');
         name: 'shadow-dom-click',
         fn: async () => {
           const host = await page.$('c-wiz');
-          if (!host) throw new Error('shadow-dom-click: host <c-wiz> not found');
+          if (!host) throw new Error('No <c-wiz> host found');
           const shadow = await host.evaluateHandle(h => h.shadowRoot);
           const btn = await shadow.asElement().$('div[data-button-type="multipleChoiceIdentifier"] >> text="For my personal use"');
-          if (!btn) throw new Error('shadow-dom-click: button not found in shadow root');
+          if (!btn) throw new Error('Shadow DOM button not found');
           await btn.click();
         }
       },
     ];
 
-    // Step 5: Run each strategy until one succeeds
+    // Step 5: Run each strategy
     const results = [];
     for (const attempt of attempts) {
       log('TRY', attempt.name);
@@ -179,7 +189,7 @@ const puppeteer = require('puppeteer');
         await attempt.fn();
         await delay(2000);
         await dump(`after-${attempt.name}`, page);
-        log('SUCCESS', `${attempt.name} succeeded — URL: ${page.url()}`);
+        log('SUCCESS', `${attempt.name} worked → URL: ${page.url()}`);
         results.push({ name: attempt.name, success: true });
         break;
       } catch (err) {
@@ -189,14 +199,14 @@ const puppeteer = require('puppeteer');
       }
     }
 
-    // Step 6: Summary of all attempts
-    log('SUMMARY', 'Click strategy results:');
-    results.forEach(r => {
-      if (r.success) log('RESULT', `${r.name}: ✅ worked`);
-      else       log('RESULT', `${r.name}: ❌ failed (${r.error})`);
-    });
+    // Step 6: Summary
+    log('SUMMARY', 'Click strategy outcomes:');
+    for (const r of results) {
+      if (r.success) log('RESULT', `✅ ${r.name}`);
+      else           log('RESULT', `❌ ${r.name}: ${r.error}`);
+    }
 
-    // Final state dump
+    // Final artifact
     await dump('final-state', page);
   } catch (err) {
     log('ERROR', `Uncaught exception: ${err.stack || err.message}`);
