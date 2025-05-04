@@ -123,11 +123,20 @@ async function clickByXPath(page, xpath, timeout = 5000, polling = 500) {
     await new Promise(res => setTimeout(res, 5000));
     await captureScreenshot('click-create-account');
 
-    // Step 3: Click "For my personal use"
-    console.log('[STEP 3] Click "For my personal use"');
-    const personalXPath = `//span[contains(text(), 'For my personal use')]`;
-    await clickByXPath(page, personalXPath, 5000);
+        // Step 3: Click "For my personal use" option
+    console.log('[STEP 3] Click "For my personal use" option');
+    // Wait for choice container to appear
+    await page.waitForSelector('div[data-button-type="multipleChoiceIdentifier"]', { visible: true, timeout: 10000 });
+    // Find and click the correct option by its inner text
+    await page.evaluate(() => {
+      const choices = Array.from(document.querySelectorAll('div[data-button-type="multipleChoiceIdentifier"]'));
+      const target = choices.find(el => el.innerText && el.innerText.includes('For my personal use'));
+      if (!target) throw new Error('"For my personal use" option not found');
+      target.scrollIntoView();
+      target.click();
+    });
     console.log('[INFO] "For my personal use" clicked');
+    // Allow time for the next form to load
     await new Promise(res => setTimeout(res, 5000));
     await captureScreenshot('for-personal-use');
 
